@@ -11,14 +11,10 @@ import re
 # Game vars
 res_x, res_y = 1920, 1080
 
+
+
 class Main:
-	if len(sys.argv) >= 2:
-		if sys.argv[1] == "--aaa":
-			flag_AAA = True
-		else:
-			flag_AAA = False
-	else:
-		flag_AAA = False
+	flag_AAA = len(sys.argv) >= 2 and sys.argv[1] == "--aaa"
 	flag_start = False
 	flag_gui = False
 	flag_OpenGL = False
@@ -203,10 +199,7 @@ def get_screen_position(camera:hg.Node, point: hg.Vec3, resolution: hg.Vec2):
 	cam = camera.GetCamera()
 	view_state = hg.ComputePerspectiveViewState(camera.GetTransform().GetWorld(), cam.GetFov(), cam.GetZNear(), cam.GetZFar(), hg.ComputeAspectRatioX(resolution.x, resolution.y))
 	flag, pos2d = hg.ProjectToScreenSpace(view_state.proj, view_state.view * point, resolution)
-	if flag:
-		return hg.Vec2(pos2d.x, pos2d.y)
-	else:
-		return None
+	return hg.Vec2(pos2d.x, pos2d.y) if flag else None
 
 
 def hover_objects_test(objects_list: list, camera: hg.Node, resolution: hg.Vec2, mouse_position: hg.Vec2):
@@ -281,13 +274,16 @@ def setup_collisions():
 		if "col_shape" in nm:
 			_, mm = nd.GetObject().GetMinMax(Main.pipeline_res)
 			size = (mm.mx - mm.mn)
-			ref = Main.pipeline_res.AddModel('col_shape' + str(i), hg.CreateCubeModel(Main.vs_decl, size.x, size.y, size.z))
+			ref = Main.pipeline_res.AddModel(
+				f'col_shape{str(i)}',
+				hg.CreateCubeModel(Main.vs_decl, size.x, size.y, size.z),
+			)
 			pos = nd.GetTransform().GetPos()
 			rot = nd.GetTransform().GetRot()
 			parent = nd.GetTransform().GetParent()
 			material = nd.GetObject().GetMaterial(0)
 			new_node = hg.CreatePhysicCube(Main.scene, hg.Vec3(size), hg.TransformationMat4(hg.Vec3(pos), hg.Vec3(rot)), ref, [material], 0)
-			new_node.SetName("ColBox_" + str(i))
+			new_node.SetName(f"ColBox_{str(i)}")
 			rb = new_node.GetRigidBody()
 			if "table" in nm:
 				rb.SetRestitution(0.15)
@@ -330,38 +326,36 @@ def compute_stick_targeting_position():
 
 def state_observation_update():
 	if Animations.is_running():
-		if not Animations.update_animations(Main.ts):
+		if Animations.update_animations(Main.ts):
+			Animations.clear_animations()
+
+		else:
 			camera = Main.scene.GetCurrentCamera()
 			camera.GetTransform().SetPos(Main.anim_camera_pos.v)
 			camera.GetTransform().SetRot(Main.anim_camera_rot.v)
 			if Main.anim_stick_pos is not None:
 				Main.stick.GetTransform().SetPos(Main.anim_stick_pos.v)
 				Main.stick.GetTransform().SetRot(Main.anim_stick_rot.v)
-		else:
-			Animations.clear_animations()
+	elif Main.mouse.Pressed(hg.MB_1):
+		reset_balls()
 
+	elif Main.mouse.Down(hg.MB_0):
+		if Main.current_ball_hover is not None:
+			return setup_state_targeting()
+		camera = Main.scene.GetCurrentCamera()
+		cam_pos = camera.GetTransform().GetPos()
+		target_pos = Main.table_center.GetTransform().GetPos()
+		cam_pos, cam_rot = compute_mouse_circular_pos(cam_pos, target_pos, Main.state_observation_camera_distance, Main.state_observation_camera_altitude)
+		camera.GetTransform().SetPos(cam_pos)
+		camera.GetTransform().SetRot(cam_rot)
 	else:
-		if Main.mouse.Pressed(hg.MB_1):
-			reset_balls()
-
-		elif Main.mouse.Down(hg.MB_0):
-			if Main.current_ball_hover is None:
-				camera = Main.scene.GetCurrentCamera()
-				cam_pos = camera.GetTransform().GetPos()
-				target_pos = Main.table_center.GetTransform().GetPos()
-				cam_pos, cam_rot = compute_mouse_circular_pos(cam_pos, target_pos, Main.state_observation_camera_distance, Main.state_observation_camera_altitude)
-				camera.GetTransform().SetPos(cam_pos)
-				camera.GetTransform().SetRot(cam_rot)
-			else:
-				return setup_state_targeting()
-		else:
-			Main.current_ball_hover = hover_objects_test(Main.balls, Main.scene.GetCurrentCamera(), Main.resolution, hg.Vec2(Main.mouse.X(), Main.mouse.Y()))
-			if Main.current_ball_hover is not None:
-				ball_pos = hg.GetT(Main.current_ball_hover.GetTransform().GetWorld())
-				p = get_screen_position(Main.scene.GetCurrentCamera(), ball_pos, Main.resolution)
-				if p is not None:
-					Main.selector.set_position(p.x, p.y + Main.selector_offset_y)
-					Main.sprites_display_list.append(Main.selector)
+		Main.current_ball_hover = hover_objects_test(Main.balls, Main.scene.GetCurrentCamera(), Main.resolution, hg.Vec2(Main.mouse.X(), Main.mouse.Y()))
+		if Main.current_ball_hover is not None:
+			ball_pos = hg.GetT(Main.current_ball_hover.GetTransform().GetWorld())
+			p = get_screen_position(Main.scene.GetCurrentCamera(), ball_pos, Main.resolution)
+			if p is not None:
+				Main.selector.set_position(p.x, p.y + Main.selector_offset_y)
+				Main.sprites_display_list.append(Main.selector)
 
 	return state_observation_update
 
@@ -397,44 +391,43 @@ def setup_state_observation():
 
 def state_targeting_update():
 	if Animations.is_running():
-		if not Animations.update_animations(Main.ts):
+		if Animations.update_animations(Main.ts):
+			Animations.clear_animations()
+		else:
 			camera = Main.scene.GetCurrentCamera()
 			camera.GetTransform().SetPos(Main.anim_camera_pos.v)
 			camera.GetTransform().SetRot(Main.anim_camera_rot.v)
 			Main.stick.GetTransform().SetPos(Main.anim_stick_pos.v)
 			Main.stick.GetTransform().SetRot(Main.anim_stick_rot.v)
-		else:
-			Animations.clear_animations()
+	elif Main.mouse.Pressed(hg.MB_0):
+		shoot_v = hg.GetZ(Main.scene.GetCurrentCamera().GetTransform().GetWorld())
+		shoot_v.y = 0
+		shoot_v = hg.Normalize(shoot_v)
+		Main.shoot_ball = Main.current_ball_hover
+		imp = Main.impulse_range[0] * (1 - Main.shoot_level) + Main.impulse_range[1] * Main.shoot_level
+		Main.shoot_v = shoot_v * imp
+		Main.shoot_p = hg.GetT(Main.shoot_ball.GetTransform().GetWorld())
+		return setup_state_shoot()
+
+	elif Main.mouse.Pressed(hg.MB_1):
+		return setup_state_observation()
+
 	else:
-		if Main.mouse.Pressed(hg.MB_0):
-			shoot_v = hg.GetZ(Main.scene.GetCurrentCamera().GetTransform().GetWorld())
-			shoot_v.y = 0
-			shoot_v = hg.Normalize(shoot_v)
-			Main.shoot_ball = Main.current_ball_hover
-			imp = Main.impulse_range[0] * (1 - Main.shoot_level) + Main.impulse_range[1] * Main.shoot_level
-			Main.shoot_v = shoot_v * imp
-			Main.shoot_p = hg.GetT(Main.shoot_ball.GetTransform().GetWorld())
-			return setup_state_shoot()
-
-		elif Main.mouse.Pressed(hg.MB_1):
-			return setup_state_observation()
-
-		else:
-			camera = Main.scene.GetCurrentCamera()
-			cam_pos = camera.GetTransform().GetPos()
-			target = Main.current_ball_hover
-			target_pos = hg.GetT(target.GetTransform().GetWorld())
-			cam_pos, cam_rot = compute_mouse_circular_pos(cam_pos, target_pos, Main.state_targeting_camera_distance, Main.state_targeting_camera_altitude)
-			camera.GetTransform().SetPos(cam_pos)
-			camera.GetTransform().SetRot(cam_rot)
-			mw = Main.mouse.Wheel()
-			Main.shoot_level = max(0, min(1, Main.shoot_level + mw * 0.05))
-			Main.state_targeting_camera_distance = (Main.state_targeting_distance_range[0] * (1 - Main.shoot_level)) + Main.state_targeting_distance_range[1] * Main.shoot_level
-			Main.state_targeting_camera_altitude = (Main.state_targeting_altitude_range[0] * (1 - Main.shoot_level)) + Main.state_targeting_altitude_range[1] * Main.shoot_level
-			Main.state_targeting_camera_altitude += target_pos.y
-			pos, rot = compute_stick_targeting_position()
-			Main.stick.GetTransform().SetPos(pos)
-			Main.stick.GetTransform().SetRot(rot)
+		camera = Main.scene.GetCurrentCamera()
+		cam_pos = camera.GetTransform().GetPos()
+		target = Main.current_ball_hover
+		target_pos = hg.GetT(target.GetTransform().GetWorld())
+		cam_pos, cam_rot = compute_mouse_circular_pos(cam_pos, target_pos, Main.state_targeting_camera_distance, Main.state_targeting_camera_altitude)
+		camera.GetTransform().SetPos(cam_pos)
+		camera.GetTransform().SetRot(cam_rot)
+		mw = Main.mouse.Wheel()
+		Main.shoot_level = max(0, min(1, Main.shoot_level + mw * 0.05))
+		Main.state_targeting_camera_distance = (Main.state_targeting_distance_range[0] * (1 - Main.shoot_level)) + Main.state_targeting_distance_range[1] * Main.shoot_level
+		Main.state_targeting_camera_altitude = (Main.state_targeting_altitude_range[0] * (1 - Main.shoot_level)) + Main.state_targeting_altitude_range[1] * Main.shoot_level
+		Main.state_targeting_camera_altitude += target_pos.y
+		pos, rot = compute_stick_targeting_position()
+		Main.stick.GetTransform().SetPos(pos)
+		Main.stick.GetTransform().SetRot(rot)
 
 	return state_targeting_update
 
