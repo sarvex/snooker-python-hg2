@@ -53,9 +53,7 @@ class Animations:
 
 	@classmethod
 	def is_running(cls):
-		if len(cls.animations) == 0:
-			return False
-		return True
+		return len(cls.animations) != 0
 
 
 class Animation:
